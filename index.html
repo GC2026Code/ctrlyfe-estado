@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Estado da CTRLYFE + Family</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#ffffff; --fg:#151a2d; --muted:#5b6380; --line:#e2e5ef; --ok:#13804f; --ok-soft:#e3f5ec; --bad:#b3261e; --bad-soft:#fbe7e5; --accent:#5b4bd6; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0d1020; --card:#151a30; --fg:#eef0fa; --muted:#a3a9c4; --line:#262c48; --ok:#4fd39a; --ok-soft:#0f2d22; --bad:#ff8a80; --bad-soft:#3a1714; --accent:#a99cff; color-scheme: dark; } }
+  * { box-sizing: border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 48px max(16px, env(safe-area-inset-left)) }
+  main { max-width: 640px; margin: 0 auto; display:flex; flex-direction:column; gap:20px }
+  h1 { font-size: 22px; margin:0 } h2 { font-size: 16px; margin:0 0 8px }
+  .brand { color: var(--accent); font-weight: 700; letter-spacing: .02em; font-size: 13px; text-transform: uppercase }
+  .status { border-radius: 16px; padding: 20px; display:flex; gap:14px; align-items:center; border:1px solid var(--line) }
+  .status.ok { background: var(--ok-soft) } .status.bad { background: var(--bad-soft) }
+  .dot { width:14px; height:14px; border-radius:50%; flex:none } .ok .dot { background: var(--ok) } .bad .dot { background: var(--bad) }
+  .status b { display:block; font-size: 18px } .muted { color: var(--muted); font-size: 13px }
+  .card { background: var(--card); border:1px solid var(--line); border-radius: 16px; padding: 18px }
+  ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:12px }
+  li { border-left: 3px solid var(--line); padding-left: 12px } li.open { border-color: var(--bad) }
+  a { color: var(--accent) }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <div class="brand">CTRLYFE + Family</div>
+    <h1>Estado do serviço</h1>
+  </div>
+  <div id="status" class="status ok" role="status">
+    <span class="dot" aria-hidden="true"></span>
+    <div><b id="title">A verificar…</b><span id="since" class="muted"></span></div>
+  </div>
+  <div class="card">
+    <h2>Avisos recentes</h2>
+    <ul id="list"><li class="muted">Sem avisos.</li></ul>
+  </div>
+  <p class="muted">A app é verificada automaticamente de 5 em 5 minutos. Os teus dados estão guardados com cópia de segurança diária.
+    Dúvidas: apoio@ctrlyfe.app</p>
+</main>
+<script>
+  const fmt = (iso) => new Date(iso).toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" });
+  fetch("status.json?t=" + Date.now(), { cache: "no-store" })
+    .then((r) => r.json())
+    .then((s) => {
+      const ok = s.estado === "operacional";
+      document.getElementById("status").className = "status " + (ok ? "ok" : "bad");
+      document.getElementById("title").textContent = ok ? "A app está a funcionar normalmente" : "A app está com uma falha temporária";
+      document.getElementById("since").textContent = (ok ? "Desde " : "Desde ") + fmt(s.desde) + " · última verificação " + fmt(s.verificado);
+      const list = document.getElementById("list");
+      const items = (s.incidentes || []).slice(0, 10);
+      if (!items.length) return;
+      list.replaceChildren(...items.map((i) => {
+        const li = document.createElement("li");
+        if (!i.fim) li.className = "open";
+        const p = document.createElement("div");
+        p.textContent = i.texto;
+        const m = document.createElement("div");
+        m.className = "muted";
+        m.textContent = fmt(i.inicio) + (i.fim ? " → resolvido " + fmt(i.fim) : " · a decorrer");
+        li.append(p, m);
+        return li;
+      }));
+    })
+    .catch(() => { document.getElementById("title").textContent = "Não foi possível ler o estado agora"; });
+</script>
+</body>
+</html>

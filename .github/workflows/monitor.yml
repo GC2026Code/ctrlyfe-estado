@@ -1,0 +1,62 @@
+# Verifica a CTRLYFE + Family de 5 em 5 minutos e atualiza a página de estado.
+# Sem ações de terceiros e sem segredos: só curl e o gh que já vem no GitHub, com o token do próprio repositório.
+name: Monitor
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Verificar a app
+        id: check
+        run: |
+          ok() { for i in 1 2 3; do code=$(curl -s -o /dev/null -m 20 -w "%{http_code}" "$1"); [ "$code" = 200 ] && return 0; sleep 20; done; return 1; }
+          site=up; api=up
+          ok https://ctrlyfe.app || site=down
+          ok https://api.ctrlyfe.app/health || api=down
+          if [ "$site" = up ] && [ "$api" = up ]; then echo "estado=operacional" >> "$GITHUB_OUTPUT"; else echo "estado=em_baixo" >> "$GITHUB_OUTPUT"; fi
+          echo "detalhe=site:$site api:$api" >> "$GITHUB_OUTPUT"
+      - name: Atualizar a página e os alertas
+        env:
+          NOVO: ${{ steps.check.outputs.estado }}
+          DETALHE: ${{ steps.check.outputs.detalhe }}
+        run: |
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          meta=$(gh api "repos/$REPO/contents/status.json")
+          sha=$(echo "$meta" | jq -r .sha)
+          atual=$(echo "$meta" | jq -r .content | base64 -d)
+          antes=$(echo "$atual" | jq -r .estado)
+          ultima=$(echo "$atual" | jq -r .verificado)
+          aberto=$(gh issue list -R "$REPO" --label incidente --state open --json number --jq '.[0].number // empty')
+          if [ "$NOVO" = em_baixo ] && [ -z "$aberto" ]; then
+            gh label create incidente -R "$REPO" --color B60205 2>/dev/null || true
+            gh issue create -R "$REPO" --label incidente --title "A app está em baixo ($now)" --body "A verificação automática falhou 3 vezes seguidas ($DETALHE). Segue o plano em docs/PLANO_INCIDENTES.md."
+          fi
+          if [ "$NOVO" = operacional ] && [ -n "$aberto" ]; then
+            gh issue close "$aberto" -R "$REPO" --comment "A app voltou a responder às $now."
+          fi
+          # Só grava quando o estado muda ou de hora a hora (para não encher o histórico).
+          idade=$(( $(date -u +%s) - $(date -u -d "$ultima" +%s) ))
+          if [ "$NOVO" = "$antes" ] && [ "$idade" -lt 3600 ]; then exit 0; fi
+          if [ "$NOVO" != "$antes" ]; then
+            if [ "$NOVO" = em_baixo ]; then
+              novo=$(echo "$atual" | jq --arg t "$now" '.estado="em_baixo" | .desde=$t | .verificado=$t | .incidentes=([{"inicio":$t,"fim":null,"texto":"A app não está a responder. Estamos a resolver; os dados estão seguros."}] + .incidentes)[:20]')
+            else
+              novo=$(echo "$atual" | jq --arg t "$now" '.estado="operacional" | .desde=$t | .verificado=$t | (.incidentes[] | select(.fim==null) | .fim) = $t')
+            fi
+          else
+            novo=$(echo "$atual" | jq --arg t "$now" '.verificado=$t')
+          fi
+          gh api -X PUT "repos/$REPO/contents/status.json" -f message="Estado: $NOVO ($now)" -f sha="$sha" -f content="$(echo "$novo" | base64 -w0)" >/dev/null
